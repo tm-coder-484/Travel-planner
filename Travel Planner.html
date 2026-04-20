@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Travel Planner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body, #root { height: 100%; margin: 0; padding: 0; }
+    body { font-family: 'DM Sans', sans-serif; background: #FAFAF8; color: #1C1C1A; -webkit-font-smoothing: antialiased; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #D8D8D4; border-radius: 99px; }
+    ::-webkit-scrollbar-thumb:hover { background: #B8B8B2; }
+    input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.4; cursor: pointer; }
+    .leaflet-container { font-family: 'DM Sans', sans-serif; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="tp-components.jsx"></script>
+<script type="text/babel" src="tp-itinerary.jsx"></script>
+<script type="text/babel" src="tp-flights.jsx"></script>
+<script type="text/babel" src="tp-map.jsx"></script>
+
+<script type="text/babel">
+const STORAGE_KEY = 'travelplanner_v2';
+const TRIP_COLORS = ['#4A72C0','#C0504A','#4A9C6B','#C07A4A','#7A4AC0','#C0B04A','#4A9CC0','#C04A82'];
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "accentColor": "#4A72C0",
+  "sidebarWidth": 260,
+  "compactMode": false
+}/*EDITMODE-END*/;
+
+function genId() { return Math.random().toString(36).slice(2, 10); }
+
+function loadData() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || { trips: [] }; } catch { return { trips: [] }; }
+}
+function saveData(data) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {}
+}
+
+// ── NEW TRIP MODAL ────────────────────────────────────────────────────────────
+function NewTripModal({ onSave, onClose }) {
+  const [name, setName] = React.useState('');
+  const [destination, setDestination] = React.useState('');
+  const [startDate, setStartDate] = React.useState('');
+  const [endDate, setEndDate] = React.useState('');
+
+  const save = () => {
+    if (!name.trim()) return;
+    const colorIdx = Math.floor(Math.random() * TRIP_COLORS.length);
+    onSave({ id: genId(), name: name.trim(), destination, startDate, endDate, coverColor: TRIP_COLORS[colorIdx], days: [], flights: [], hotels: [], destinations: [], notes: '' });
+    onClose();
+  };
+
+  return (
+    <Modal title="New Trip" onClose={onClose} width={440}
+      footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn onClick={save} disabled={!name.trim()}>Create Trip</Btn></>}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <Input label="Trip Name *" value={name} onChange={setName} placeholder="e.g. Europe Summer 2026" autoFocus
+          onKeyDown={e => e.key === 'Enter' && save()} />
+        <Input label="Primary Destination" value={destination} onChange={setDestination} placeholder="e.g. Paris, Rome, Barcelona" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Input label="Start Date" type="date" value={startDate} onChange={setStartDate} />
+          <Input label="End Date" type="date" value={endDate} onChange={setEndDate} />
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ── EDIT TRIP MODAL ───────────────────────────────────────────────────────────
+function EditTripModal({ trip, onSave, onClose }) {
+  const [name, setName] = React.useState(trip.name);
+  const [destination, setDestination] = React.useState(trip.destination || '');
+  const [startDate, setStartDate] = React.useState(trip.startDate || '');
+  const [endDate, setEndDate] = React.useState(trip.endDate || '');
+  const [notes, setNotes] = React.useState(trip.notes || '');
+
+  return (
+    <Modal title="Edit Trip" onClose={onClose} width={440}
+      footer={<><Btn variant="secondary" onClick={onClose}>Cancel</Btn><Btn onClick={() => { onSave({ ...trip, name, destination, startDate, endDate, notes }); onClose(); }}>Save</Btn></>}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <Input label="Trip Name" value={name} onChange={setName} autoFocus />
+        <Input label="Primary Destination" value={destination} onChange={setDestination} placeholder="e.g. Japan" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <Input label="Start Date" type="date" value={startDate} onChange={setStartDate} />
+          <Input label="End Date" type="date" value={endDate} onChange={setEndDate} />
+        </div>
+        <Textarea label="Overview Notes" value={notes} onChange={setNotes} placeholder="Themes, goals, visa info…" rows={3} />
+      </div>
+    </Modal>
+  );
+}
+
+// ── SIDEBAR ───────────────────────────────────────────────────────────────────
+function Sidebar({ trips, selectedId, onSelect, onNewTrip, sidebarWidth }) {
+  return (
+    <div style={{
+      width: sidebarWidth, flexShrink: 0, display: 'flex', flexDirection: 'column',
+      background: '#F2F2EE', borderRight: `1px solid #E5E5E2`, height: '100%', overflow: 'hidden',
+    }}>
+      {/* Logo */}
+      <div style={{ padding: '20px 18px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#1C1C1A', letterSpacing: '-0.01em' }}>Travel Planner</div>
+          <div style={{ fontSize: 11, color: '#7A7A74' }}>{trips.length} trip{trips.length !== 1 ? 's' : ''}</div>
+        </div>
+        <button onClick={onNewTrip} title="New Trip" style={{
+          width: 28, height: 28, borderRadius: 7, background: tpColors.accent, color: '#fff',
+          border: 'none', cursor: 'pointer', fontSize: 18, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>+</button>
+      </div>
+
+      {/* Trips list */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 10px 16px' }}>
+        {trips.length === 0 && (
+          <div style={{ padding: '12px 8px', fontSize: 12, color: '#7A7A74', textAlign: 'center', fontStyle: 'italic' }}>No trips yet</div>
+        )}
+        {trips.map(trip => {
+          const active = trip.id === selectedId;
+          return (
+            <SidebarTripItem key={trip.id} trip={trip} active={active} onClick={() => onSelect(trip.id)} />
+          );
+        })}
+      </div>
+
+      {/* Footer */}
+      <div style={{ padding: '12px 18px', borderTop: '1px solid #E5E5E2' }}>
+        <Btn variant="secondary" size="sm" onClick={onNewTrip} style={{ width: '100%', justifyContent: 'center' }}>+ New Trip</Btn>
+      </div>
+    </div>
+  );
+}
+
+function SidebarTripItem({ trip, active, onClick }) {
+  const [hover, setHover] = React.useState(false);
+  return (
+    <div onClick={onClick}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        padding: '9px 10px', borderRadius: 8, cursor: 'pointer', marginBottom: 2,
+        background: active ? '#fff' : hover ? '#EAEAE6' : 'transparent',
+        boxShadow: active ? '0 1px 4px rgba(0,0,0,0.07)' : 'none',
+        transition: 'background 0.12s, box-shadow 0.12s',
+        display: 'flex', alignItems: 'center', gap: 10,
+      }}>
+      {/* Color dot */}
+      <div style={{ width: 8, height: 8, borderRadius: '50%', background: trip.coverColor || tpColors.accent, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: active ? 600 : 400, color: '#1C1C1A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{trip.name}</div>
+        {(trip.startDate || trip.destination) && (
+          <div style={{ fontSize: 11, color: '#7A7A74', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {trip.destination || formatDateShort(trip.startDate)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── DASHBOARD (no trip selected) ──────────────────────────────────────────────
+function Dashboard({ trips, onSelect, onNewTrip }) {
+  if (trips.length === 0) {
+    return (
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', maxWidth: 360 }}>
+          <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.15 }}>✈</div>
+          <h2 style={{ margin: '0 0 8px', fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Your trips live here</h2>
+          <p style={{ margin: '0 0 24px', fontSize: 14, color: tpColors.textMuted, lineHeight: 1.6 }}>Plan itineraries, track flights & hotels, and map your routes — all in one place.</p>
+          <Btn size="lg" onClick={onNewTrip}>+ Create your first trip</Btn>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '32px 36px' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 24 }}>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>Your Trips</h1>
+        <Btn onClick={onNewTrip}>+ New Trip</Btn>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
+        {trips.map(trip => <TripCard key={trip.id} trip={trip} onClick={() => onSelect(trip.id)} />)}
+      </div>
+    </div>
+  );
+}
+
+function TripCard({ trip, onClick }) {
+  const [hover, setHover] = React.useState(false);
+  const dur = tripDuration(trip.startDate, trip.endDate);
+  const totalActivities = (trip.days || []).reduce((s, d) => s + (d.activities || []).length, 0);
+
+  return (
+    <div onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        borderRadius: 12, border: `1px solid ${tpColors.border}`, background: tpColors.surface,
+        cursor: 'pointer', overflow: 'hidden',
+        boxShadow: hover ? '0 8px 24px rgba(0,0,0,0.09)' : '0 1px 4px rgba(0,0,0,0.05)',
+        transform: hover ? 'translateY(-2px)' : 'none', transition: 'all 0.18s ease',
+      }}>
+      {/* Color banner */}
+      <div style={{ height: 5, background: trip.coverColor || tpColors.accent }} />
+      <div style={{ padding: '16px 18px 18px' }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: tpColors.text, marginBottom: 4, letterSpacing: '-0.01em' }}>{trip.name}</div>
+        {trip.destination && <div style={{ fontSize: 12, color: tpColors.textMuted, marginBottom: 10 }}>{trip.destination}</div>}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: 12, color: tpColors.textMuted }}>
+          {trip.startDate && <span>{formatDateShort(trip.startDate)}{trip.endDate && ` – ${formatDateShort(trip.endDate)}`}</span>}
+          {dur && <span>{dur}</span>}
+        </div>
+        {/* Stats row */}
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          {(trip.days || []).length > 0 && <Badge color="gray">{(trip.days || []).length} days</Badge>}
+          {(trip.flights || []).length > 0 && <Badge color="blue">{(trip.flights || []).length} flights</Badge>}
+          {(trip.hotels || []).length > 0 && <Badge color="green">{(trip.hotels || []).length} hotels</Badge>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── TRIP DETAIL ───────────────────────────────────────────────────────────────
+const TABS = [
+  { id: 'itinerary', label: 'Itinerary' },
+  { id: 'flights', label: 'Flights & Hotels' },
+  { id: 'map', label: 'Route Map' },
+];
+
+function TripDetail({ trip, onUpdateTrip, onDeleteTrip, onBack }) {
+  const [activeTab, setActiveTab] = React.useState('itinerary');
+  const [editing, setEditing] = React.useState(false);
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ padding: '16px 24px', borderBottom: `1px solid ${tpColors.border}`, background: tpColors.surface, display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+        <button onClick={onBack} style={{ background: 'none', border: 'none', cursor: 'pointer', color: tpColors.textMuted, fontSize: 18, lineHeight: 1, padding: '2px 4px', display: 'flex', alignItems: 'center' }}>←</button>
+        <div style={{ width: 10, height: 10, borderRadius: '50%', background: trip.coverColor || tpColors.accent, flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h1 style={{ margin: 0, fontSize: 16, fontWeight: 700, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{trip.name}</h1>
+          <div style={{ fontSize: 11, color: tpColors.textMuted }}>
+            {[trip.destination, trip.startDate && `${formatDateShort(trip.startDate)}${trip.endDate ? ` – ${formatDateShort(trip.endDate)}` : ''}`, tripDuration(trip.startDate, trip.endDate)].filter(Boolean).join(' · ')}
+          </div>
+        </div>
+        <Btn variant="ghost" size="sm" onClick={() => setEditing(true)}>Edit</Btn>
+        <Btn variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>Delete</Btn>
+      </div>
+
+      {/* Notes banner */}
+      {trip.notes && (
+        <div style={{ padding: '8px 24px', background: tpColors.accentLight, borderBottom: `1px solid ${tpColors.accent}22`, fontSize: 12, color: tpColors.text }}>
+          {trip.notes}
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 0, padding: '0 24px', borderBottom: `1px solid ${tpColors.border}`, background: tpColors.surface, flexShrink: 0 }}>
+        {TABS.map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
+            padding: '11px 16px', border: 'none', background: 'none', cursor: 'pointer',
+            fontSize: 13, fontWeight: activeTab === tab.id ? 600 : 400,
+            color: activeTab === tab.id ? tpColors.accent : tpColors.textMuted,
+            borderBottom: activeTab === tab.id ? `2px solid ${tpColors.accent}` : '2px solid transparent',
+            transition: 'all 0.15s', fontFamily: 'inherit',
+          }}>{tab.label}</button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: tpColors.bg }}>
+        {activeTab === 'itinerary' && <ItineraryTab trip={trip} onUpdateTrip={onUpdateTrip} />}
+        {activeTab === 'flights' && <FlightsTab trip={trip} onUpdateTrip={onUpdateTrip} />}
+        {activeTab === 'map' && <MapTab trip={trip} onUpdateTrip={onUpdateTrip} />}
+      </div>
+
+      {editing && <EditTripModal trip={trip} onSave={onUpdateTrip} onClose={() => setEditing(false)} />}
+      {confirmDelete && <ConfirmDialog message={`Delete "${trip.name}"? This cannot be undone.`} onConfirm={onDeleteTrip} onCancel={() => setConfirmDelete(false)} />}
+    </div>
+  );
+}
+
+// ── APP ROOT ──────────────────────────────────────────────────────────────────
+function App() {
+  const [data, setData] = React.useState(() => loadData());
+  const [selectedId, setSelectedId] = React.useState(() => {
+    const saved = localStorage.getItem('travelplanner_selected');
+    return saved || null;
+  });
+  const [showNewTrip, setShowNewTrip] = React.useState(false);
+  const [tweaks, setTweaks] = React.useState(TWEAK_DEFAULTS);
+  const [tweaksPanelOpen, setTweaksPanelOpen] = React.useState(false);
+
+  const trips = data.trips || [];
+  const selectedTrip = trips.find(t => t.id === selectedId) || null;
+
+  // Persist data
+  React.useEffect(() => { saveData(data); }, [data]);
+  React.useEffect(() => {
+    if (selectedId) localStorage.setItem('travelplanner_selected', selectedId);
+    else localStorage.removeItem('travelplanner_selected');
+  }, [selectedId]);
+
+  // Tweaks system
+  React.useEffect(() => {
+    window.addEventListener('message', e => {
+      if (e.data?.type === '__activate_edit_mode') setTweaksPanelOpen(true);
+      if (e.data?.type === '__deactivate_edit_mode') setTweaksPanelOpen(false);
+    });
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+  }, []);
+
+  const applyTweak = (key, val) => {
+    const next = { ...tweaks, [key]: val };
+    setTweaks(next);
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { [key]: val } }, '*');
+  };
+
+  const addTrip = (trip) => {
+    setData(d => ({ ...d, trips: [...(d.trips || []), trip] }));
+    setSelectedId(trip.id);
+  };
+  const updateTrip = (updated) => {
+    setData(d => ({ ...d, trips: d.trips.map(t => t.id === updated.id ? updated : t) }));
+  };
+  const deleteTrip = (id) => {
+    setData(d => ({ ...d, trips: d.trips.filter(t => t.id !== id) }));
+    setSelectedId(null);
+  };
+
+  return (
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        <Sidebar
+          trips={trips}
+          selectedId={selectedId}
+          onSelect={id => setSelectedId(prev => prev === id ? null : id)}
+          onNewTrip={() => setShowNewTrip(true)}
+          sidebarWidth={tweaks.sidebarWidth}
+        />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {selectedTrip
+            ? <TripDetail trip={selectedTrip} onUpdateTrip={updateTrip} onDeleteTrip={() => deleteTrip(selectedTrip.id)} onBack={() => setSelectedId(null)} />
+            : <Dashboard trips={trips} onSelect={setSelectedId} onNewTrip={() => setShowNewTrip(true)} />
+          }
+        </div>
+      </div>
+
+      {showNewTrip && <NewTripModal onSave={addTrip} onClose={() => setShowNewTrip(false)} />}
+
+      {/* Tweaks Panel */}
+      {tweaksPanelOpen && (
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, background: tpColors.surface,
+          border: `1px solid ${tpColors.border}`, borderRadius: 12, padding: '18px 20px',
+          width: 260, boxShadow: '0 8px 32px rgba(0,0,0,0.12)', zIndex: 2000,
+        }}>
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 14 }}>Tweaks</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 500, color: tpColors.textMuted, display: 'block', marginBottom: 6 }}>Accent Color</label>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {TRIP_COLORS.map(c => (
+                  <button key={c} onClick={() => applyTweak('accentColor', c)} style={{
+                    width: 22, height: 22, borderRadius: '50%', background: c, border: tweaks.accentColor === c ? `2.5px solid #1C1C1A` : '2.5px solid transparent', cursor: 'pointer',
+                  }} />
+                ))}
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 500, color: tpColors.textMuted, display: 'block', marginBottom: 6 }}>Sidebar Width: {tweaks.sidebarWidth}px</label>
+              <input type="range" min={180} max={320} step={10} value={tweaks.sidebarWidth} onChange={e => applyTweak('sidebarWidth', +e.target.value)}
+                style={{ width: '100%', accentColor: tpColors.accent }} />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
