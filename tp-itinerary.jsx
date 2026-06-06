@@ -39,10 +39,32 @@ function weatherDesc(code) {
   return 'Thunderstorm';
 }
 
-// Fetch weather from Open-Meteo (free, no API key) for trip destination + day dates
+// Insert empty days for every missing date between consecutive dated days
+function fillDateGaps(days) {
+  if (days.length < 2) return days;
+  const result = [];
+  for (let i = 0; i < days.length; i++) {
+    result.push(days[i]);
+    if (i < days.length - 1) {
+      const curr = days[i].date;
+      const next = days[i + 1].date;
+      if (curr && next) {
+        const currD = new Date(curr + 'T00:00:00');
+        const nextD = new Date(next + 'T00:00:00');
+        const diff = Math.round((nextD - currD) / 86400000);
+        for (let j = 1; j < diff; j++) {
+          const d = new Date(currD);
+          d.setDate(d.getDate() + j);
+          result.push({ id: genId(), date: d.toISOString().slice(0, 10), activities: [] });
+        }
+      }
+    }
+  }
+  return result;
+}
+
 function useWeather(destination, days) {
   const [weather, setWeather] = React.useState({});
-
   const dateKey = (days || []).map(d => d.date).join(',');
 
   React.useEffect(() => {
@@ -59,7 +81,6 @@ function useWeather(destination, days) {
     const startD = new Date(startDate + 'T00:00:00');
     const endD = new Date(endDate + 'T00:00:00');
 
-    // Open-Meteo forecast covers up to 16 days ahead; skip fully past trips
     const maxForecast = new Date(today);
     maxForecast.setDate(maxForecast.getDate() + 15);
     if (endD < today || startD > maxForecast) { setWeather({}); return; }
@@ -204,7 +225,6 @@ function DayColumn({ day, dayIndex, allDays, weather, onUpdateDay, onDeleteDay }
   const activities = day.activities || [];
   const currentIdx = allDays.findIndex(d => d.id === day.id);
 
-  // Collect activities from earlier days whose endDayId reaches this day or beyond
   const continuedActivities = [];
   allDays.slice(0, currentIdx).forEach(prevDay => {
     (prevDay.activities || []).forEach(act => {
@@ -300,6 +320,48 @@ function DayColumn({ day, dayIndex, allDays, weather, onUpdateDay, onDeleteDay }
   );
 }
 
+// Thin divider between day cards — hover reveals an insert affordance
+function DayGap({ prevDay, nextDay, onInsert }) {
+  const [hover, setHover] = React.useState(false);
+
+  const handleInsert = () => {
+    let date = '';
+    if (prevDay?.date) {
+      const d = new Date(prevDay.date + 'T00:00:00');
+      d.setDate(d.getDate() + 1);
+      date = d.toISOString().slice(0, 10);
+    } else if (nextDay?.date) {
+      const d = new Date(nextDay.date + 'T00:00:00');
+      d.setDate(d.getDate() - 1);
+      date = d.toISOString().slice(0, 10);
+    }
+    onInsert(date);
+  };
+
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onClick={handleInsert}
+      style={{ position: 'relative', padding: '5px 0', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+    >
+      <div style={{
+        flex: 1, height: 1,
+        background: hover ? tpColors.accent + '80' : tpColors.border,
+        transition: 'background 0.15s',
+      }} />
+      {hover && (
+        <div style={{
+          position: 'absolute', left: '50%', transform: 'translateX(-50%)',
+          background: tpColors.accentLight, border: `1px solid ${tpColors.accent}66`,
+          borderRadius: 99, padding: '2px 12px', fontSize: 11, fontWeight: 600,
+          color: tpColors.accent, whiteSpace: 'nowrap', zIndex: 1,
+        }}>+ Insert Day</div>
+      )}
+    </div>
+  );
+}
+
 function ItineraryTab({ trip, onUpdateTrip }) {
   const [showAddDay, setShowAddDay] = React.useState(false);
   const [newDayDate, setNewDayDate] = React.useState('');
@@ -310,9 +372,17 @@ function ItineraryTab({ trip, onUpdateTrip }) {
 
   const addDay = () => {
     const d = { id: genId(), date: newDayDate, activities: [] };
-    onUpdateTrip({ ...trip, days: [...days, d] });
+    const newDays = fillDateGaps([...days, d]);
+    onUpdateTrip({ ...trip, days: newDays });
     setShowAddDay(false);
     setNewDayDate('');
+  };
+
+  // Insert a new day after `afterIndex`; auto-fills any resulting date gaps
+  const insertDay = (afterIndex, date) => {
+    const newDay = { id: genId(), date, activities: [] };
+    const spliced = [...days.slice(0, afterIndex + 1), newDay, ...days.slice(afterIndex + 1)];
+    onUpdateTrip({ ...trip, days: fillDateGaps(spliced) });
   };
 
   const updateDay = (updated) => {
@@ -339,6 +409,27 @@ function ItineraryTab({ trip, onUpdateTrip }) {
     }
   }, [showAddDay]);
 
+  // Build the interleaved list of day columns and gap affordances
+  const dayItems = [];
+  days.forEach((day, i) => {
+    if (i > 0) {
+      dayItems.push(
+        <DayGap key={`gap-${i}`}
+          prevDay={days[i - 1]}
+          nextDay={day}
+          onInsert={date => insertDay(i - 1, date)}
+        />
+      );
+    }
+    dayItems.push(
+      <DayColumn key={day.id} day={day} dayIndex={i} allDays={days}
+        weather={weather}
+        onUpdateDay={updateDay}
+        onDeleteDay={() => setConfirmDeleteDay(day.id)}
+      />
+    );
+  });
+
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
@@ -353,14 +444,8 @@ function ItineraryTab({ trip, onUpdateTrip }) {
         <EmptyState icon="📅" title="No days yet" subtitle="Add your first day to start building your itinerary."
           action={<Btn onClick={() => setShowAddDay(true)}>+ Add Day</Btn>} />
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {days.map((day, i) => (
-            <DayColumn key={day.id} day={day} dayIndex={i} allDays={days}
-              weather={weather}
-              onUpdateDay={updateDay}
-              onDeleteDay={() => setConfirmDeleteDay(day.id)}
-            />
-          ))}
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {dayItems}
         </div>
       )}
 
