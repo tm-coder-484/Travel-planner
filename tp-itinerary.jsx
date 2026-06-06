@@ -220,7 +220,7 @@ function DayColumn({ day, dayIndex, allDays, weather, onUpdateDay, onDeleteDay }
   const [showAddActivity, setShowAddActivity] = React.useState(false);
   const [editActivity, setEditActivity] = React.useState(null);
   const [confirmDelete, setConfirmDelete] = React.useState(null);
-  const [collapsed, setCollapsed] = React.useState(false);
+  const [collapsed, setCollapsed] = React.useState((day.activities || []).length === 0);
 
   const activities = day.activities || [];
   const currentIdx = allDays.findIndex(d => d.id === day.id);
