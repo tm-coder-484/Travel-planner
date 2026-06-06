@@ -39,15 +39,35 @@ function weatherDesc(code) {
   return 'Thunderstorm';
 }
 
+// Deduplicate days with the same date, keeping the one with more activities
+function deduplicateDays(days) {
+  const best = new Map();
+  days.forEach(day => {
+    if (!day.date) return;
+    const ex = best.get(day.date);
+    if (!ex || (day.activities || []).length > (ex.activities || []).length) {
+      best.set(day.date, day);
+    }
+  });
+  const seen = new Set();
+  return days.filter(day => {
+    if (!day.date) return true;
+    if (seen.has(day.date)) return false;
+    seen.add(day.date);
+    return best.get(day.date) === day;
+  });
+}
+
 // Insert empty days for every missing date between consecutive dated days
 function fillDateGaps(days) {
-  if (days.length < 2) return days;
+  const deduped = deduplicateDays(days);
+  if (deduped.length < 2) return deduped;
   const result = [];
-  for (let i = 0; i < days.length; i++) {
-    result.push(days[i]);
-    if (i < days.length - 1) {
-      const curr = days[i].date;
-      const next = days[i + 1].date;
+  for (let i = 0; i < deduped.length; i++) {
+    result.push(deduped[i]);
+    if (i < deduped.length - 1) {
+      const curr = deduped[i].date;
+      const next = deduped[i + 1].date;
       if (curr && next) {
         const currD = new Date(curr + 'T00:00:00');
         const nextD = new Date(next + 'T00:00:00');
@@ -233,6 +253,11 @@ function DayColumn({ day, dayIndex, allDays, weather, onUpdateDay, onDeleteDay }
   const [editActivity, setEditActivity] = React.useState(null);
   const [confirmDelete, setConfirmDelete] = React.useState(null);
   const [collapsed, setCollapsed] = React.useState(activities.length === 0);
+
+  // Re-collapse whenever own activities become empty (covers dynamic updates and page load)
+  React.useEffect(() => {
+    if (activities.length === 0) setCollapsed(true);
+  }, [activities.length]);
 
   const addActivity = (form) => {
     onUpdateDay({ ...day, activities: [...activities, { id: genId(), ...form }] });
@@ -469,4 +494,4 @@ function ItineraryTab({ trip, onUpdateTrip }) {
   );
 }
 
-Object.assign(window, { ItineraryTab, fillDateGaps });
+Object.assign(window, { ItineraryTab, fillDateGaps, deduplicateDays });
