@@ -44,7 +44,13 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 function genId() { return Math.random().toString(36).slice(2, 10); }
 
 function loadData() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || { trips: [] }; } catch { return { trips: [] }; }
+  try {
+    const data = JSON.parse(localStorage.getItem(STORAGE_KEY)) || { trips: [] };
+    return {
+      ...data,
+      trips: (data.trips || []).map(t => ({ ...t, days: fillDateGaps(t.days || []) })),
+    };
+  } catch { return { trips: [] }; }
 }
 function saveData(data) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {}

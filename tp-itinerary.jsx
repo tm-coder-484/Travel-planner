@@ -464,4 +464,4 @@ function ItineraryTab({ trip, onUpdateTrip }) {
   );
 }
 
-Object.assign(window, { ItineraryTab });
+Object.assign(window, { ItineraryTab, fillDateGaps });
