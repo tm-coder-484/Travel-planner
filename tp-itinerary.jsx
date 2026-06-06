@@ -217,11 +217,6 @@ function ActivityCard({ activity, isSpanning, isContinuation, onEdit, onDelete }
 }
 
 function DayColumn({ day, dayIndex, allDays, weather, onUpdateDay, onDeleteDay }) {
-  const [showAddActivity, setShowAddActivity] = React.useState(false);
-  const [editActivity, setEditActivity] = React.useState(null);
-  const [confirmDelete, setConfirmDelete] = React.useState(null);
-  const [collapsed, setCollapsed] = React.useState((day.activities || []).length === 0);
-
   const activities = day.activities || [];
   const currentIdx = allDays.findIndex(d => d.id === day.id);
 
@@ -233,6 +228,11 @@ function DayColumn({ day, dayIndex, allDays, weather, onUpdateDay, onDeleteDay }
       if (endIdx >= currentIdx) continuedActivities.push(act);
     });
   });
+
+  const [showAddActivity, setShowAddActivity] = React.useState(false);
+  const [editActivity, setEditActivity] = React.useState(null);
+  const [confirmDelete, setConfirmDelete] = React.useState(null);
+  const [collapsed, setCollapsed] = React.useState(activities.length === 0);
 
   const addActivity = (form) => {
     onUpdateDay({ ...day, activities: [...activities, { id: genId(), ...form }] });
@@ -263,6 +263,11 @@ function DayColumn({ day, dayIndex, allDays, weather, onUpdateDay, onDeleteDay }
           <div style={{ fontSize: 13, fontWeight: 600, color: tpColors.text }}>{dateLabel}</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {collapsed && continuedActivities.length > 0 && (
+            <span title={continuedActivities.map(a => a.title).join(', ')} style={{ fontSize: 11, fontWeight: 600, color: tpColors.accent, background: tpColors.accentLight, padding: '2px 7px', borderRadius: 99, border: `1px solid ${tpColors.accent}33` }}>
+              ↪ {continuedActivities.length}
+            </span>
+          )}
           {wx && (
             <div
               title={`${weatherDesc(wx.code)} · ${wx.max}° high / ${wx.min}° low`}
